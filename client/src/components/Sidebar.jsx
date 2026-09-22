@@ -27,9 +27,8 @@ export default function Sidebar() {
       <div className="flex flex-col items-center mb-8">
         <div className="w-28 h-28 rounded-2xl bg-black flex items-center justify-center overflow-hidden ring-1 ring-white/10">
           <div className="text-center">
-            <div className="text-amber-400 font-extrabold text-lg leading-none">Benny's</div>
-            <div className="text-amber-400 font-extrabold text-lg leading-none">CUSTOM</div>
-            <div className="text-[8px] text-gray-400 mt-1 tracking-wide">Benny's Custom</div>
+            <div className="text-amber-400 font-extrabold text-lg leading-none">BENNY'S</div>
+            <div className="text-[8px] text-gray-400 mt-1 tracking-wide">ORIGINAL MOTOR WORKS</div>
           </div>
         </div>
       </div>
