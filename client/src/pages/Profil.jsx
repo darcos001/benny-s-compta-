@@ -1,16 +1,36 @@
 import { useState, useEffect } from 'react';
-import { UserCircle, DollarSign, Wrench, TrendingUp } from 'lucide-react';
+import { UserCircle, DollarSign, Wrench, TrendingUp, AlertTriangle, RotateCcw } from 'lucide-react';
 import CarteStat from '../components/CarteStat.jsx';
 import { appelApi, formaterArgent } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Profil() {
-  const { employe } = useAuth();
+  const { employe, deconnecter } = useAuth();
   const [stats, setStats] = useState(null);
+  const [modaleResetOuverte, setModaleResetOuverte] = useState(false);
+  const [textConfirmation, setTextConfirmation] = useState('');
+  const [resetEnCours, setResetEnCours] = useState(false);
+  const [erreurReset, setErreurReset] = useState('');
 
   useEffect(() => {
     appelApi(`/interventions/stats/employe/${employe.id}`).then(setStats);
   }, [employe.id]);
+
+  async function confirmerReset() {
+    setResetEnCours(true);
+    setErreurReset('');
+    try {
+      await appelApi('/admin/reset', {
+        method: 'POST',
+        body: JSON.stringify({ confirmation: textConfirmation }),
+      });
+      await deconnecter();
+      window.location.reload();
+    } catch (e) {
+      setErreurReset(e.message);
+      setResetEnCours(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -60,6 +80,69 @@ export default function Profil() {
             titre="Commissions perçues"
             valeur={formaterArgent(stats.total_commission)}
           />
+        </div>
+      )}
+
+      {employe.est_admin && (
+        <div className="bg-bg-panel rounded-xl p-6 border border-red-500/20">
+          <div className="flex items-center gap-2 text-red-400 font-semibold mb-2">
+            <AlertTriangle size={18} />
+            Zone dangereuse
+          </div>
+          <p className="text-gray-400 text-sm mb-4">
+            Réinitialise entièrement le site : toutes les réparations, customs, employés, dépenses,
+            l'historique de paie et le catalogue seront définitivement supprimés. Seul le compte
+            admin par défaut sera recréé.
+          </p>
+          <button
+            onClick={() => setModaleResetOuverte(true)}
+            className="flex items-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 font-semibold text-sm px-4 py-2.5 rounded-lg hover:bg-red-500/20"
+          >
+            <RotateCcw size={16} />
+            Réinitialiser le site
+          </button>
+        </div>
+      )}
+
+      {modaleResetOuverte && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+          <div className="bg-bg-panel rounded-xl w-full max-w-md p-6 flex flex-col gap-4">
+            <div className="flex items-center gap-2 text-red-400 font-semibold text-lg">
+              <AlertTriangle size={20} />
+              Confirmer la réinitialisation
+            </div>
+            <p className="text-gray-400 text-sm">
+              Cette action est <span className="text-red-400 font-semibold">irréversible</span>. Tape{' '}
+              <span className="font-mono text-white">RESET</span> ci-dessous pour confirmer.
+            </p>
+            <input
+              type="text"
+              value={textConfirmation}
+              onChange={(e) => setTextConfirmation(e.target.value)}
+              placeholder="RESET"
+              className="bg-bg-card border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500/50"
+            />
+            {erreurReset && <p className="text-red-400 text-sm">{erreurReset}</p>}
+            <div className="flex gap-3 justify-end mt-2">
+              <button
+                onClick={() => {
+                  setModaleResetOuverte(false);
+                  setTextConfirmation('');
+                  setErreurReset('');
+                }}
+                className="text-gray-400 hover:text-white text-sm font-semibold px-4 py-2.5"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmerReset}
+                disabled={textConfirmation !== 'RESET' || resetEnCours}
+                className="bg-red-500 text-white font-semibold text-sm px-4 py-2.5 rounded-lg disabled:opacity-40"
+              >
+                {resetEnCours ? 'Réinitialisation...' : 'Confirmer la réinitialisation'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
