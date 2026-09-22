@@ -18,7 +18,7 @@ import Badgeuse from './pages/Badgeuse.jsx';
 import Documents from './pages/Documents.jsx';
 import Paie from './pages/Paie.jsx';
 import HistoriquePaie from './pages/HistoriquePaie.jsx';
-import Depenses from './pages/Depenses.jsx';
+import Depenses from './pages/depenses.jsx';
 
 function MisePagePrivee({ children }) {
   const { employe, chargement, deconnecter } = useAuth();
