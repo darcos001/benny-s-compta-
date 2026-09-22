@@ -47,16 +47,15 @@ export default function ContratFormatte({ contenu, surImprimer }) {
           <div className="flex items-center gap-2">
             <Wrench size={22} className="text-[#3b82f6]" />
             <span className="text-2xl font-extrabold">
-              <span className="text-[#3b82f6]">LS </span>
-              <span className="text-[#d97706]">CUSTOM</span>
+              <span className="text-[#3b82f6]">BENNY'S</span>
             </span>
           </div>
-          <div className="text-[#cbd5e1] text-xs tracking-wide mt-1">LOS SANTOS CUSTOM — SERVEUR SUNNY RP</div>
+          <div className="text-[#cbd5e1] text-xs tracking-wide mt-1">LOS SANTOS — SERVEUR SUNNY RP</div>
         </div>
 
         <div className="px-8 py-8">
           <h1 className="text-center text-2xl font-extrabold text-gray-900">CONTRAT DE TRAVAIL</h1>
-          <p className="text-center text-gray-500 italic text-sm mt-1 mb-8">Mécanicien — Garage Los Santos Custom</p>
+          <p className="text-center text-gray-500 italic text-sm mt-1 mb-8">Mécanicien — Garage Benny's</p>
 
           <div className="flex flex-col gap-1">
             {blocs.map((bloc, i) => {
