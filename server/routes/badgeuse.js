@@ -1,0 +1,231 @@
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const db = require('../db');
+const { verifierToken, SECRET } = require('../auth');
+
+const router = express.Router();
+
+const TAUX_HORAIRE = 100; // $ par heure
+
+function versDateSQLite(d) {
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function debutSemaineISO() {
+  const d = new Date();
+  const jour = d.getDay();
+  const decalage = jour === 0 ? -6 : 1 - jour;
+  d.setDate(d.getDate() + decalage); // Lundi
+  d.setHours(0, 0, 0, 0);
+  return versDateSQLite(d);
+}
+
+function normaliserDate(valeur) {
+  if (!valeur) return valeur;
+  // Corrige rétroactivement une ancienne valeur enregistrée au format "2026-07-05T16:40:00.000Z"
+  // au lieu du format SQLite "2026-07-05 16:40:00", pour que les comparaisons de dates marchent.
+  return valeur.includes('T') ? valeur.slice(0, 19).replace('T', ' ') : valeur;
+}
+
+function dateDepuisPourPaie() {
+  const ligne = db.prepare('SELECT date_reset FROM parametres_paie WHERE id = 1').get();
+  return normaliserDate(ligne && ligne.date_reset) || debutSemaineISO();
+}
+
+function calculerHeures(sessions) {
+  let totalMs = 0;
+  const maintenant = Date.now();
+  for (const s of sessions) {
+    const debut = new Date(s.debut).getTime();
+    const fin = s.fin ? new Date(s.fin).getTime() : maintenant;
+    totalMs += Math.max(0, fin - debut);
+  }
+  return totalMs / (1000 * 60 * 60);
+}
+
+function terminerSessionPourEmploye(employeId) {
+  const enCours = db
+    .prepare('SELECT id FROM sessions_service WHERE employe_id = ? AND fin IS NULL')
+    .get(employeId);
+  if (enCours) {
+    db.prepare("UPDATE sessions_service SET fin = datetime('now') WHERE id = ?").run(enCours.id);
+  }
+  db.prepare('UPDATE employes SET en_service = 0 WHERE id = ?').run(employeId);
+}
+
+router.post('/fin-beacon', (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).end();
+  try {
+    const payload = jwt.verify(token, SECRET);
+    terminerSessionPourEmploye(payload.id);
+    res.status(204).end();
+  } catch (e) {
+    res.status(401).end();
+  }
+});
+
+router.use(verifierToken);
+
+router.post('/debut', (req, res) => {
+  const employeId = req.utilisateur.id;
+
+  const enCours = db
+    .prepare('SELECT id FROM sessions_service WHERE employe_id = ? AND fin IS NULL')
+    .get(employeId);
+
+  if (enCours) {
+    db.prepare("UPDATE sessions_service SET fin = datetime('now') WHERE id = ?").run(enCours.id);
+  }
+
+  db.prepare('INSERT INTO sessions_service (employe_id) VALUES (?)').run(employeId);
+  db.prepare('UPDATE employes SET en_service = 1 WHERE id = ?').run(employeId);
+  res.status(201).json({ ok: true });
+});
+
+router.post('/fin', (req, res) => {
+  terminerSessionPourEmploye(req.utilisateur.id);
+  res.json({ ok: true });
+});
+
+router.get('/moi', (req, res) => {
+  const employeId = req.utilisateur.id;
+
+  const toutes = db
+    .prepare('SELECT * FROM sessions_service WHERE employe_id = ? ORDER BY debut DESC')
+    .all(employeId);
+
+  const semaine = toutes.filter((s) => s.debut >= debutSemaineISO());
+
+  const heuresSemaine = calculerHeures(semaine);
+  const heuresTotal = calculerHeures(toutes);
+
+  res.json({
+    sessions: toutes.slice(0, 30),
+    en_service: toutes.some((s) => !s.fin),
+    heures_semaine: heuresSemaine,
+    montant_semaine: Math.round(heuresSemaine * TAUX_HORAIRE * 100) / 100,
+    heures_total: heuresTotal,
+    montant_total: Math.round(heuresTotal * TAUX_HORAIRE * 100) / 100,
+    taux_horaire: TAUX_HORAIRE,
+  });
+});
+
+router.get('/equipe', (req, res) => {
+  if (!req.utilisateur.est_admin) {
+    return res.status(403).json({ erreur: 'Accès réservé aux administrateurs' });
+  }
+
+  const employes = db.prepare('SELECT id, nom_affiche FROM employes ORDER BY nom_affiche').all();
+  const debutSemaine = debutSemaineISO();
+
+  const resultat = employes.map((emp) => {
+    const toutes = db
+      .prepare('SELECT * FROM sessions_service WHERE employe_id = ? ORDER BY debut DESC')
+      .all(emp.id);
+    const semaine = toutes.filter((s) => s.debut >= debutSemaine);
+    const heuresSemaine = calculerHeures(semaine);
+    const heuresTotal = calculerHeures(toutes);
+
+    return {
+      employe_id: emp.id,
+      nom_affiche: emp.nom_affiche,
+      en_service: toutes.some((s) => !s.fin),
+      heures_semaine: heuresSemaine,
+      montant_semaine: Math.round(heuresSemaine * TAUX_HORAIRE * 100) / 100,
+      heures_total: heuresTotal,
+      montant_total: Math.round(heuresTotal * TAUX_HORAIRE * 100) / 100,
+    };
+  });
+
+  res.json({ employes: resultat, taux_horaire: TAUX_HORAIRE });
+});
+
+function calculerPaieActuelle() {
+  const depuis = dateDepuisPourPaie();
+
+  const employes = db
+    .prepare(
+      `SELECT e.id, e.nom_affiche, g.nom AS grade_nom, g.commission_pourcentage, g.couleur
+       FROM employes e
+       JOIN grades g ON g.id = e.grade_id
+       ORDER BY e.nom_affiche`
+    )
+    .all();
+
+  const resultat = employes.map((emp) => {
+    const commissions = db
+      .prepare(
+        `SELECT COALESCE(SUM(commission_montant), 0) AS total, COUNT(*) AS nb
+         FROM interventions WHERE employe_id = ? AND date_creation >= ?`
+      )
+      .get(emp.id, depuis);
+
+    const sessions = db
+      .prepare('SELECT * FROM sessions_service WHERE employe_id = ? ORDER BY debut DESC')
+      .all(emp.id);
+    const sessionsDepuis = sessions.filter((s) => s.debut >= depuis);
+    const heuresDepuis = calculerHeures(sessionsDepuis);
+    const montantBadgeuse = Math.round(heuresDepuis * TAUX_HORAIRE * 100) / 100;
+
+    const montantCommissions = Math.round(commissions.total * 100) / 100;
+    const totalAPayer = Math.round((montantCommissions + montantBadgeuse) * 100) / 100;
+
+    return {
+      employe_id: emp.id,
+      nom_affiche: emp.nom_affiche,
+      grade_nom: emp.grade_nom,
+      commission_pourcentage: emp.commission_pourcentage,
+      couleur: emp.couleur,
+      interventions_count: commissions.nb,
+      montant_commissions: montantCommissions,
+      heures_badgeuse: heuresDepuis,
+      montant_badgeuse: montantBadgeuse,
+      total_a_payer: totalAPayer,
+    };
+  });
+
+  return { employes: resultat, depuis };
+}
+
+router.get('/paie', (req, res) => {
+  if (!req.utilisateur.est_admin) {
+    return res.status(403).json({ erreur: 'Accès réservé aux administrateurs' });
+  }
+  const { employes, depuis } = calculerPaieActuelle();
+  res.json({ employes, taux_horaire: TAUX_HORAIRE, depuis });
+});
+
+router.get('/paie/historique', (req, res) => {
+  if (!req.utilisateur.est_admin) {
+    return res.status(403).json({ erreur: 'Accès réservé aux administrateurs' });
+  }
+  const lignes = db.prepare('SELECT * FROM historique_paie ORDER BY date_paiement DESC').all();
+  const resultat = lignes.map((l) => ({
+    id: l.id,
+    date_paiement: l.date_paiement,
+    depuis: l.depuis,
+    jusqu_a: l.jusqu_a,
+    montant_total: l.montant_total,
+    employes: JSON.parse(l.detail_json),
+  }));
+  res.json(resultat);
+});
+
+router.post('/paie/reset', (req, res) => {
+  if (!req.utilisateur.est_admin) {
+    return res.status(403).json({ erreur: 'Accès réservé aux administrateurs' });
+  }
+  const { employes, depuis } = calculerPaieActuelle();
+  const jusquA = versDateSQLite(new Date());
+  const montantTotal = Math.round(employes.reduce((s, e) => s + e.total_a_payer, 0) * 100) / 100;
+
+  db.prepare(
+    'INSERT INTO historique_paie (depuis, jusqu_a, montant_total, detail_json) VALUES (?, ?, ?, ?)'
+  ).run(depuis, jusquA, montantTotal, JSON.stringify(employes));
+
+  db.prepare('UPDATE parametres_paie SET date_reset = ? WHERE id = 1').run(jusquA);
+  res.json({ ok: true, depuis: jusquA });
+});
+
+module.exports = router;

@@ -1,0 +1,34 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+
+require('./db');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+app.use(cors());
+app.use(express.json());
+
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/employes', require('./routes/employes'));
+app.use('/api/grades', require('./routes/grades'));
+app.use('/api/catalogue', require('./routes/catalogue'));
+app.use('/api/interventions', require('./routes/interventions'));
+app.use('/api/badgeuse', require('./routes/badgeuse'));
+app.use('/api/contrats', require('./routes/contrats'));
+app.use('/api/marques', require('./routes/marques'));
+app.use('/api/contrat-travail', require('./routes/contratTravail'));
+app.use('/api/depenses', require('./routes/depenses'));
+
+const distPath = path.join(__dirname, '..', 'client', 'dist');
+app.use(express.static(distPath));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
+app.listen(PORT, () => {
+  console.log(`Serveur Benny's démarré sur le port ${PORT}`);
+});
